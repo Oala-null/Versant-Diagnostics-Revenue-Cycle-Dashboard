@@ -1,0 +1,13 @@
+{
+type = "service_account"
+project_id = "versantdiagnosticsrca"
+private_key_id = "5fa45810940e72d6d84a3e539cf2e2a8c30ca6a1"
+private_key = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC3VLeVw8kI/h8M\nk/+hNKZTt9Q3Fa7V5oWpsbLF8hvZMVFBMcnd6twOOo8iJKE4gVLN+IfFZf6p7oCO\nikxHE5KCq91i1rZwpHXLqeFQXo8I34KAZxsYKLy6KxnAx7GIbl3tOtKOkxfdNfR+\nvPEKchC3Xmh3Bq9VIM4+Hrsu4rr0huDjJ/YPp9SKwNvlO4BV4x50MvVQhKnYyY6R\nTPbdPK7DisqdLZ1z7cTzDGFPDB855xDemJ6zFSM6sBBiBIas33pkYHx5S1o7E0E3\nK/Nzr168/C8NiOmFNaC0zhTUTx0YID8au7vtAdxyCNe4GzUIjkpIa3YwbwfT/vFX\n9sMA5GLfAgMBAAECggEAWWGkYBAkY44B9U/ywdW5gfeOL40SwJazdBh+4KM5kJrK\n0s5DbT6kKwvB3ROexr3GcUVKbKNdldwCMXyb08tnEu5X8Whdam3EQJeCknyHn/vY\n1GFwhEbYPKvm0maJ18p3YMHdBkYQzHkRyvizTDRwkfYlWGKZ+RcVdpPlDubb33tP\nZomzIHi2ppeg5Tnc/s9F9ZsT2oh9LhUUyZ5pKiAEfraDhDFif8Hp3iA6aej4K++X\nlmbDpwhtbIgtuISpLRcJEjEpjr79a2PaH0glRW7c83vuNIUrcZw5ZyBF3ME7eO8o\n8l3yvrQ3gvzEbDu+1VsBpzHIPRhli+PfL1/ERpY/AQKBgQDmPOHGBnXN/H8ugD6j\nKzj0Q3Ldb0XilYt7D4wB0AuCjBQzOExdgSTWQdTMCK6nNBgzGuCLAWJXv5vzYTmZ\nqnN+N/Gp0dS4090piYBKTks1HjSzObKMpNLyz17cqZktM0G4jWQP9t6K+DMN3RGq\nSK8KMVSfdQB1ELrmNk09VshGyQKBgQDL2DI9ivWXCLGoSsAVPtIfYhiZLlFuweDb\nf0rerXywZKB+De0eOYL9j+822Be3LqOjIfQeWgvaT7RmUtEQwtY1BFrb4n3XCFa8\nw9Rjr2vVw3/PiI+6qLBGi+DzOSO7YcWDVceru16/64HkMOy8/fdsK7NdukXqSKN1\nP6rnKvyoZwKBgAz1tlu4N19d7CbI7z2uDCmrtkaCofNsKYrGyEG93Tf+/JAZhirp\nPxKUaA8IGhStWQNfau5IKKn5ziR3/48HyjJ7oa3GcuvoeRWCeOc12wPlbF/+Sm+i\nQ4GJbLSNE2M49GUYCF7hrYszB2SrYfgs2TWAq1vCcUElrO+SdOyT+vgJAoGBALjP\nHNWRG5HADxnOE5Hvb5+GV1jhlnC9E/jM0ntKfKaLxLokNBtX9vueODnX9sBcZ31q\nNiIib2aRJrQyV1tD2eMdPKboFEEVTVY8kV2DWFfotALbA7wuXgrHnL3Gyy+CuAiX\nh7yZ1pBXm17gQHIkKuMGR8stK1/6VT/i5jZJUeH3AoGAP2kIkM2t7ERxA8qCrE2J\nSnoIchSsGQWmT3YTm85zv9X2CpqFEy3oBPGV9zBQdDn7v58KrK1ORTA46JGEr0c/\nLA2AuYIziBzJfOq9OXO8obuOTFtAegA2WwBQdykAfs3UaX/dEDbayzju1pdVnnPE\nlQcO0Kl8O3/QwomFq2jVGVM=\n-----END PRIVATE KEY-----\n"
+client_email = "streamlit-storage@versantdiagnosticsrca.iam.gserviceaccount.com"
+client_id = "110999132114344885740"
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/streamlit-storage%40versantdiagnosticsrca.iam.gserviceaccount.com"
+"universe_domain": "googleapis.com"
+}
