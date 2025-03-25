@@ -1,14 +1,23 @@
-# streamlit_app.py
-import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import streamlit as st
 from datetime import datetime, timedelta
-import io
+import os
+import re
+import random
+from io import BytesIO
+import base64
 
-# Set page configuration
+# Explicitly add openpyxl as a dependency
+try:
+    import openpyxl
+except ImportError:
+    st.error("Missing required dependency: openpyxl. Please install it with pip install openpyxl")
+
+# Set page config for Streamlit
 st.set_page_config(
     page_title="Versant Diagnostics Revenue Cycle Analysis",
     page_icon="📊",
@@ -16,76 +25,81 @@ st.set_page_config(
 )
 
 # -------------------------------------------------------------
-# Data Loading Function with Multiple Options
+# Data Loading Functions
 # -------------------------------------------------------------
-@st.cache_data
-def load_data():
-    """Load the data from cloud storage or file upload"""
-    
-    # Option 1: File uploader
-    uploaded_file = st.file_uploader("Upload Excel File (optional)", type="xlsx")
-    
-    if uploaded_file is not None:
-        try:
-            df = pd.read_excel(uploaded_file)
-            st.success("Successfully loaded data from uploaded file")
-        except Exception as e:
-            st.error(f"Failed to load from uploaded file: {e}")
-            # Fall back to Google Cloud Storage if file upload fails
-            df = load_from_gcs()
-    else:
-        # Try loading from Google Cloud Storage
-        df = load_from_gcs()
-            
-    return process_dataframe(df)
-
-def load_from_gcs():
-    """Helper function to load data from Google Cloud Storage"""
+def load_data_from_upload(uploaded_file):
+    """Load data from uploaded file"""
     try:
-        from st_files_connection import FilesConnection
+        # Get file extension to handle different file formats
+        file_ext = uploaded_file.name.split('.')[-1].lower()
         
-        # Initialize connection to GCS
-        # Uses st.secrets["connections"]["gcs"] credentials
-        conn = st.experimental_connection("gcs", type=FilesConnection)
+        if file_ext in ['xlsx', 'xls']:
+            # For Excel files
+            df = pd.read_excel(uploaded_file, engine='openpyxl')
+        elif file_ext == 'csv':
+            # Allow CSV files as well
+            df = pd.read_csv(uploaded_file)
+        else:
+            st.sidebar.error(f"Unsupported file format: {file_ext}. Please upload Excel or CSV files.")
+            return pd.DataFrame()
         
-        # Read the file from your GCS bucket
-        df = conn.read("practice-spreadsheet/PracticeCaseStudy.xlsx", input_format=None, ttl=3600)
-        st.success("Successfully loaded data from Google Cloud Storage")
+        # Ensure Procedure Code is treated as a string
+        if 'Procedure Code' in df.columns:
+            df['Procedure Code'] = df['Procedure Code'].astype(str)
+            
+        st.sidebar.success("File uploaded successfully!")
         return df
-        
     except Exception as e:
-        st.error(f"Failed to load from GCS: {e}")
-        # Create sample data if nothing is available
-        st.warning("Using sample data for demonstration.")
-        return create_sample_data()
+        st.sidebar.error(f"Error loading uploaded file: {str(e)}")
+        return pd.DataFrame()
 
 def create_sample_data():
     """Create sample data for demonstration"""
-    df = pd.DataFrame({
-        "Date of Service": pd.date_range(start="2023-01-01", periods=100, freq="D"),
-        "Charge Line Item Amount": np.random.uniform(100, 5000, 100),
-        "Total Payments Amount": np.random.uniform(50, 4000, 100),
-        "Total Adjustments Amount": np.random.uniform(0, 1000, 100),
-        "Charge Line Item Balance": np.random.uniform(0, 1000, 100),
-        "Accession #": [f"ACC-{i:04d}" for i in range(100)],
-        "Primary Payer Name": np.random.choice(["Medicare", "Medicaid", "Private Insurance", "Self Pay"], 100),
-        "Primary Payer Payment Amount": np.random.uniform(50, 3000, 100),
-        "Total Contractual Adjustment Amount": np.random.uniform(0, 2000, 100),
-        "Total Other Adjustment Amount": np.random.uniform(0, 500, 100),
-        "Date of Entry": pd.date_range(start="2023-01-01", periods=100, freq="D"),
-        "Date of Initial Bill": pd.date_range(start="2023-01-05", periods=100, freq="D"),
-        "Procedure Code": np.random.choice(["88305", "88342", "88341", "88312", "88313"], 100),
-        "Location of Service Name": np.random.choice(["Main Hospital", "Downtown Clinic", "North Branch", "South Branch"], 100),
-    })
+    # Create date range
+    start_date = datetime(2023, 1, 1)
+    dates = [start_date + timedelta(days=i) for i in range(100)]
+    
+    # Create sample data
+    data = {
+        'Date of Service': dates,
+        'Date of Entry': [d + timedelta(days=random.randint(1, 5)) for d in dates],
+        'Date of Initial Bill': [d + timedelta(days=random.randint(7, 30)) for d in dates],
+        'Charge Line Item Amount': [random.uniform(500, 2000) for _ in range(100)],
+        'Total Payments Amount': [random.uniform(300, 1800) for _ in range(100)],
+        'Total Adjustments Amount': [random.uniform(0, 500) for _ in range(100)],
+        'Total Contractual Adjustment Amount': [random.uniform(0, 300) for _ in range(100)],
+        'Total Other Adjustment Amount': [random.uniform(0, 200) for _ in range(100)],
+        'Charge Line Item Balance': [random.uniform(0, 500) for _ in range(100)],
+        'Accession #': [f'ACC{i:05d}' for i in range(100)],
+        'Procedure Code': [str(random.choice(['88305', '88342', '88341', '88360', '88312'])) for _ in range(100)],
+        'Primary Payer Name': [random.choice(['Medicare', 'Medicaid', 'Blue Cross', 'UnitedHealth', 'Aetna']) for _ in range(100)],
+        'Primary Payer Payment Amount': [random.uniform(300, 1500) for _ in range(100)],
+        'Location of Service Name': [random.choice(['Main Hospital', 'North Clinic', 'South Clinic', 'East Wing', 'West Wing']) for _ in range(100)]
+    }
+    
+    df = pd.DataFrame(data)
+    
+    # Calculate derived fields
+    df['Days to Bill'] = (df['Date of Initial Bill'] - df['Date of Service']).dt.days
+    df['Collection Rate'] = (df['Total Payments Amount'] / df['Charge Line Item Amount'] * 100)
+    df['Service Month'] = df['Date of Service'].dt.to_period('M').astype(str)
+    
     return df
 
-def process_dataframe(df):
-    """Process the dataframe with common transformations"""
+def preprocess_data(df):
+    """Preprocess and clean the data"""
+    if df.empty:
+        return df
+    
     # Convert date columns to datetime
     date_columns = ['Date of Service', 'Date of Entry', 'Date of Initial Bill']
     for col in date_columns:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors='coerce')
+    
+    # Ensure Procedure Code is always treated as string to prevent type comparison errors
+    if 'Procedure Code' in df.columns:
+        df['Procedure Code'] = df['Procedure Code'].astype(str)
     
     # Calculate derived fields for analysis
     if 'Date of Service' in df.columns and 'Date of Initial Bill' in df.columns:
@@ -97,17 +111,21 @@ def process_dataframe(df):
         
     # Add year-month field for time series analysis
     if 'Date of Service' in df.columns:
-        df['Service Month'] = df['Date of Service'].dt.strftime('%Y-%m')
+        df['Service Month'] = df['Date of Service'].dt.to_period('M')
     
+    if 'Service Month' in df.columns:
+        df['Service Month'] = df['Service Month'].astype(str)
+    
+    # Calculate balance if needed
+    if all(col in df.columns for col in ['Charge Line Item Amount', 'Total Payments Amount', 'Total Adjustments Amount']):
+        if 'Charge Line Item Balance' not in df.columns:
+            df['Charge Line Item Balance'] = df['Charge Line Item Amount'] - df['Total Payments Amount'] - df['Total Adjustments Amount']
+            
     return df
 
-# Load the data
-df = load_data()
-
 # -------------------------------------------------------------
-# Helper Functions for Analytics
+# Analytics Functions
 # -------------------------------------------------------------
-
 def calculate_kpi_metrics(df):
     """Calculate key KPIs for the dashboard"""
     # Safely calculate metrics, handling potential missing columns
@@ -142,13 +160,6 @@ def calculate_kpi_metrics(df):
         'outstanding_balance': outstanding_balance,
         'case_volume': case_volume
     }
-
-# Calculate KPIs
-kpi_metrics = calculate_kpi_metrics(df)
-
-# -------------------------------------------------------------
-# Enhanced Data Quality Analysis Functions
-# -------------------------------------------------------------
 
 def missing_values_analysis(df):
     """Analyze missing values in the dataset"""
@@ -185,9 +196,8 @@ def missing_values_analysis(df):
     return fig
 
 # -------------------------------------------------------------
-# Enhanced Data Visualizations
+# Visualization Functions
 # -------------------------------------------------------------
-
 def create_revenue_flow_diagram(df, row_limit=None):
     """Create a Sankey diagram showing revenue flow from charges to final balance"""
     # Use full dataset or limit rows for performance
@@ -351,20 +361,7 @@ def create_billing_efficiency_chart(df):
 def create_procedure_analysis(df):
     """Create a chart analyzing procedure codes"""
     # Check if necessary columns exist
-    if 'Procedure Code' not in df.columns or 'Charge Line Item Amount' not in df.columns:
-        # Create empty figure with message
-        fig = go.Figure()
-        fig.add_annotation(
-            text="Missing procedure code or charge data for analysis",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, showarrow=False,
-            font=dict(size=16)
-        )
-        fig.update_layout(height=500)
-        return fig
-    
-    # Calculate procedure metrics
-    required_columns = ['Procedure Code', 'Charge Line Item Amount', 'Total Payments Amount']
+    required_columns = ['Procedure Code', 'Charge Line Item Amount', 'Total Payments Amount', 'Accession #']
     if not all(col in df.columns for col in required_columns):
         # Create empty figure with message
         fig = go.Figure()
@@ -445,7 +442,7 @@ def create_procedure_analysis(df):
 def create_location_revenue_chart(df):
     """Create a chart showing revenue by location"""
     # Check if necessary columns exist
-    required_columns = ['Location of Service Name', 'Charge Line Item Amount', 'Total Payments Amount']
+    required_columns = ['Location of Service Name', 'Charge Line Item Amount', 'Total Payments Amount', 'Accession #']
     if not all(col in df.columns for col in required_columns):
         # Create empty figure with message
         fig = go.Figure()
@@ -683,238 +680,338 @@ def create_denial_analysis(df):
 # -------------------------------------------------------------
 
 # SVG representation of the revenue cycle workflow
-workflow_svg = '''
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500">
-  <!-- Background -->
-  <rect width="800" height="500" fill="#f8f9fa" rx="10" ry="10"/>
-  
-  <!-- Title -->
-  <text x="400" y="30" font-family="Arial" font-size="20" text-anchor="middle" font-weight="bold" fill="#333">Versant Diagnostics: Anatomic Pathology Revenue Cycle Workflow</text>
-  
-  <!-- Workflow steps with arrows -->
-  <!-- Step 1 -->
-  <rect x="50" y="70" width="160" height="70" rx="10" ry="10" fill="#e6f2ff" stroke="#0066cc" stroke-width="2"/>
-  <text x="130" y="95" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Sample Collection</text>
-  <text x="130" y="115" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">Specimen accessioning</text>
-  <text x="130" y="130" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">Accession # assigned</text>
-  
-  <!-- Arrow 1 -->
-  <path d="M210 105 L240 105" stroke="#555" stroke-width="2" fill="none"/>
-  <polygon points="240,105 235,102 235,108" fill="#555"/>
-  
-  <!-- Step 2 -->
-  <rect x="240" y="70" width="160" height="70" rx="10" ry="10" fill="#e6f2ff" stroke="#0066cc" stroke-width="2"/>
-  <text x="320" y="95" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Pathology Services</text>
-  <text x="320" y="115" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">Digital diagnosis</text>
-  <text x="320" y="130" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">By sub-specialized pathologists</text>
-  
-  <!-- Arrow 2 -->
-  <path d="M400 105 L430 105" stroke="#555" stroke-width="2" fill="none"/>
-  <polygon points="430,105 425,102 425,108" fill="#555"/>
-  
-  <!-- Step 3 -->
-  <rect x="430" y="70" width="160" height="70" rx="10" ry="10" fill="#e6f2ff" stroke="#0066cc" stroke-width="2"/>
-  <text x="510" y="95" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Documentation</text>
-  <text x="510" y="115" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">Procedure and diagnosis coding</text>
-  <text x="510" y="130" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">CPT, ICD-10, modifiers</text>
-  
-  <!-- Arrow 3 -->
-  <path d="M590 105 L620 105" stroke="#555" stroke-width="2" fill="none"/>
-  <polygon points="620,105 615,102 615,108" fill="#555"/>
-  
-  <!-- Step 4 -->
-  <rect x="620" y="70" width="160" height="70" rx="10" ry="10" fill="#e6f2ff" stroke="#0066cc" stroke-width="2"/>
-  <text x="700" y="95" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Charge Capture</text>
-  <text x="700" y="115" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">LIS integration</text>
-  <text x="700" y="130" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">Charge generation</text>
-  
-  <!-- Arrow 4 - connecting to next row -->
-  <path d="M700 140 L700 160 L130 160 L130 180" stroke="#555" stroke-width="2" fill="none"/>
-  <polygon points="130,180 127,175 133,175" fill="#555"/>
-  
-  <!-- Step 5 - Second row -->
-  <rect x="50" y="180" width="160" height="70" rx="10" ry="10" fill="#fff0e6" stroke="#cc6600" stroke-width="2"/>
-  <text x="130" y="205" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Claims Submission</text>
-  <text x="130" y="225" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">To primary and secondary payers</text>
-  <text x="130" y="240" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">Date of Initial Bill</text>
-  
-  <!-- Arrow 5 -->
-  <path d="M210 215 L240 215" stroke="#555" stroke-width="2" fill="none"/>
-  <polygon points="240,215 235,212 235,218" fill="#555"/>
-  
-  <!-- Step 6 -->
-  <rect x="240" y="180" width="160" height="70" rx="10" ry="10" fill="#fff0e6" stroke="#cc6600" stroke-width="2"/>
-  <text x="320" y="205" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Payment Processing</text>
-  <text x="320" y="225" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">Insurance and patient payments</text>
-  <text x="320" y="240" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">Payment amounts tracked</text>
-  
-  <!-- Arrow 6 -->
-  <path d="M400 215 L430 215" stroke="#555" stroke-width="2" fill="none"/>
-  <polygon points="430,215 425,212 425,218" fill="#555"/>
-  
-  <!-- Step 7 -->
-  <rect x="430" y="180" width="160" height="70" rx="10" ry="10" fill="#fff0e6" stroke="#cc6600" stroke-width="2"/>
-  <text x="510" y="205" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Adjustments</text>
-  <text x="510" y="225" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">Contractual and other adjustments</text>
-  <text x="510" y="240" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">Negotiated reductions</text>
-  
-  <!-- Arrow 7 -->
-  <path d="M590 215 L620 215" stroke="#555" stroke-width="2" fill="none"/>
-  <polygon points="620,215 615,212 615,218" fill="#555"/>
-  
-  <!-- Step 8 -->
-  <rect x="620" y="180" width="160" height="70" rx="10" ry="10" fill="#fff0e6" stroke="#cc6600" stroke-width="2"/>
-  <text x="700" y="205" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Revenue Analysis</text>
-  <text x="700" y="225" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">Uncollected revenue recovery</text>
-  <text x="700" y="240" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">Balance management</text>
-  
-  <!-- Data Metrics Section -->
-  <rect x="50" y="300" width="730" height="150" rx="10" ry="10" fill="#f0f0f0" stroke="#888" stroke-width="2"/>
-  <text x="400" y="325" font-family="Arial" font-size="16" text-anchor="middle" font-weight="bold" fill="#333">Key Revenue Cycle Metrics and Analysis Points</text>
-  
-  <!-- Metrics columns -->
-  <!-- Column 1 -->
-  <text x="130" y="350" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Volume Metrics</text>
-  <text x="130" y="370" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Case volume by location</text>
-  <text x="130" y="390" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Procedure code frequency</text>
-  <text x="130" y="410" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Provider productivity</text>
-  
-  <!-- Column 2 -->
-  <text x="320" y="350" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Financial Metrics</text>
-  <text x="320" y="370" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Charges vs. collections</text>
-  <text x="320" y="390" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Adjustment rates</text>
-  <text x="320" y="410" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Collection rate by payer</text>
-  
-  <!-- Column 3 -->
-  <text x="510" y="350" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Efficiency Metrics</text>
-  <text x="510" y="370" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Days to initial bill</text>
-  <text x="510" y="390" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Lag time analysis</text>
-  <text x="510" y="410" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Clean claim rate</text>
-  
-  <!-- Column 4 -->
-  <text x="700" y="350" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Revenue Opportunities</text>
-  <text x="700" y="370" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Unbilled cases</text>
-  <text x="700" y="390" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Denial patterns</text>
-  <text x="700" y="410" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Underpaid claims</text>
-  
-  <!-- Versant logo placeholder -->
-  <text x="400" y="460" font-family="Arial" font-size="12" text-anchor="middle" font-style="italic" fill="#666">Versant Diagnostics: Transforming Patient Care Through Innovation in Digital Anatomic Pathology</text>
-</svg>
-'''
+def get_workflow_svg():
+    """Return the SVG for the revenue cycle workflow diagram"""
+    svg = '''
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500">
+      <!-- Background -->
+      <rect width="800" height="500" fill="#f8f9fa" rx="10" ry="10"/>
+      
+      <!-- Title -->
+      <text x="400" y="30" font-family="Arial" font-size="20" text-anchor="middle" font-weight="bold" fill="#333">Versant Diagnostics: Anatomic Pathology Revenue Cycle Workflow</text>
+      
+      <!-- Workflow steps with arrows -->
+      <!-- Step 1 -->
+      <rect x="50" y="70" width="160" height="70" rx="10" ry="10" fill="#e6f2ff" stroke="#0066cc" stroke-width="2"/>
+      <text x="130" y="95" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Sample Collection</text>
+      <text x="130" y="115" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">Specimen accessioning</text>
+      <text x="130" y="130" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">Accession # assigned</text>
+      
+      <!-- Arrow 1 -->
+      <path d="M210 105 L240 105" stroke="#555" stroke-width="2" fill="none"/>
+      <polygon points="240,105 235,102 235,108" fill="#555"/>
+      
+      <!-- Step 2 -->
+      <rect x="240" y="70" width="160" height="70" rx="10" ry="10" fill="#e6f2ff" stroke="#0066cc" stroke-width="2"/>
+      <text x="320" y="95" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Pathology Services</text>
+      <text x="320" y="115" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">Digital diagnosis</text>
+      <text x="320" y="130" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">By sub-specialized pathologists</text>
+      
+      <!-- Arrow 2 -->
+      <path d="M400 105 L430 105" stroke="#555" stroke-width="2" fill="none"/>
+      <polygon points="430,105 425,102 425,108" fill="#555"/>
+      
+      <!-- Step 3 -->
+      <rect x="430" y="70" width="160" height="70" rx="10" ry="10" fill="#e6f2ff" stroke="#0066cc" stroke-width="2"/>
+      <text x="510" y="95" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Documentation</text>
+      <text x="510" y="115" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">Procedure and diagnosis coding</text>
+      <text x="510" y="130" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">CPT, ICD-10, modifiers</text>
+      
+      <!-- Arrow 3 -->
+      <path d="M590 105 L620 105" stroke="#555" stroke-width="2" fill="none"/>
+      <polygon points="620,105 615,102 615,108" fill="#555"/>
+      
+      <!-- Step 4 -->
+      <rect x="620" y="70" width="160" height="70" rx="10" ry="10" fill="#e6f2ff" stroke="#0066cc" stroke-width="2"/>
+      <text x="700" y="95" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Charge Capture</text>
+      <text x="700" y="115" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">LIS integration</text>
+      <text x="700" y="130" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">Charge generation</text>
+      
+      <!-- Arrow 4 - connecting to next row -->
+      <path d="M700 140 L700 160 L130 160 L130 180" stroke="#555" stroke-width="2" fill="none"/>
+      <polygon points="130,180 127,175 133,175" fill="#555"/>
+      
+      <!-- Step 5 - Second row -->
+      <rect x="50" y="180" width="160" height="70" rx="10" ry="10" fill="#fff0e6" stroke="#cc6600" stroke-width="2"/>
+      <text x="130" y="205" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Claims Submission</text>
+      <text x="130" y="225" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">To primary and secondary payers</text>
+      <text x="130" y="240" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">Date of Initial Bill</text>
+      
+      <!-- Arrow 5 -->
+      <path d="M210 215 L240 215" stroke="#555" stroke-width="2" fill="none"/>
+      <polygon points="240,215 235,212 235,218" fill="#555"/>
+      
+      <!-- Step 6 -->
+      <rect x="240" y="180" width="160" height="70" rx="10" ry="10" fill="#fff0e6" stroke="#cc6600" stroke-width="2"/>
+      <text x="320" y="205" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Payment Processing</text>
+      <text x="320" y="225" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">Insurance and patient payments</text>
+      <text x="320" y="240" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">Payment amounts tracked</text>
+      
+      <!-- Arrow 6 -->
+      <path d="M400 215 L430 215" stroke="#555" stroke-width="2" fill="none"/>
+      <polygon points="430,215 425,212 425,218" fill="#555"/>
+      
+      <!-- Step 7 -->
+      <rect x="430" y="180" width="160" height="70" rx="10" ry="10" fill="#fff0e6" stroke="#cc6600" stroke-width="2"/>
+      <text x="510" y="205" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Adjustments</text>
+      <text x="510" y="225" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">Contractual and other adjustments</text>
+      <text x="510" y="240" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">Negotiated reductions</text>
+      
+      <!-- Arrow 7 -->
+      <path d="M590 215 L620 215" stroke="#555" stroke-width="2" fill="none"/>
+      <polygon points="620,215 615,212 615,218" fill="#555"/>
+      
+      <!-- Step 8 -->
+      <rect x="620" y="180" width="160" height="70" rx="10" ry="10" fill="#fff0e6" stroke="#cc6600" stroke-width="2"/>
+      <text x="700" y="205" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Revenue Analysis</text>
+      <text x="700" y="225" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">Uncollected revenue recovery</text>
+      <text x="700" y="240" font-family="Arial" font-size="11" text-anchor="middle" fill="#666">Balance management</text>
+      
+      <!-- Data Metrics Section -->
+      <rect x="50" y="300" width="730" height="150" rx="10" ry="10" fill="#f0f0f0" stroke="#888" stroke-width="2"/>
+      <text x="400" y="325" font-family="Arial" font-size="16" text-anchor="middle" font-weight="bold" fill="#333">Key Revenue Cycle Metrics and Analysis Points</text>
+      
+      <!-- Metrics columns -->
+      <!-- Column 1 -->
+      <text x="130" y="350" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Volume Metrics</text>
+      <text x="130" y="370" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Case volume by location</text>
+      <text x="130" y="390" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Procedure code frequency</text>
+      <text x="130" y="410" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Provider productivity</text>
+      
+      <!-- Column 2 -->
+      <text x="320" y="350" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Financial Metrics</text>
+      <text x="320" y="370" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Charges vs. collections</text>
+      <text x="320" y="390" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Adjustment rates</text>
+      <text x="320" y="410" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Collection rate by payer</text>
+      
+      <!-- Column 3 -->
+      <text x="510" y="350" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Efficiency Metrics</text>
+      <text x="510" y="370" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Days to initial bill</text>
+      <text x="510" y="390" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Lag time analysis</text>
+      <text x="510" y="410" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Clean claim rate</text>
+      
+      <!-- Column 4 -->
+      <text x="700" y="350" font-family="Arial" font-size="14" text-anchor="middle" font-weight="bold" fill="#333">Revenue Opportunities</text>
+      <text x="700" y="370" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Unbilled cases</text>
+      <text x="700" y="390" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Denial patterns</text>
+      <text x="700" y="410" font-family="Arial" font-size="12" text-anchor="middle" fill="#555">• Underpaid claims</text>
+      
+      <!-- Versant logo placeholder -->
+      <text x="400" y="460" font-family="Arial" font-size="12" text-anchor="middle" font-style="italic" fill="#666">Versant Diagnostics: Transforming Patient Care Through Innovation in Digital Anatomic Pathology</text>
+    </svg>
+    '''
+    return svg
 
 # -------------------------------------------------------------
-# Streamlit Dashboard Layout
+# Main Application
 # -------------------------------------------------------------
 
-# Header section
-st.title("Versant Diagnostics Revenue Cycle Analysis")
-st.subheader("Interactive dashboard for analyzing revenue cycle performance metrics")
-
-# Format KPI values for display
-formatted_kpis = {
-    'total_charges': f"${kpi_metrics['total_charges']:,.2f}",
-    'total_payments': f"${kpi_metrics['total_payments']:,.2f}",
-    'total_adjustments': f"${kpi_metrics['total_adjustments']:,.2f}",
-    'collection_rate': f"{kpi_metrics['collection_rate']:.1f}%",
-    'avg_days_to_bill': f"{kpi_metrics['avg_days_to_bill']:.1f} days",
-    'outstanding_balance': f"${kpi_metrics['outstanding_balance']:,.2f}",
-    'case_volume': f"{kpi_metrics['case_volume']:,}"
-}
-
-# KPI Card Row
-st.header("Key Performance Indicators")
-
-# Display KPIs in a grid with 4 and 3 metrics per row
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric("Total Charges", formatted_kpis['total_charges'])
-with col2:
-    st.metric("Total Payments", formatted_kpis['total_payments'])
-with col3:
-    st.metric("Collection Rate", formatted_kpis['collection_rate'])
-with col4:
-    st.metric("Case Volume", formatted_kpis['case_volume'])
-
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric("Average Days to Bill", formatted_kpis['avg_days_to_bill'])
-with col2:
-    st.metric("Outstanding Balance", formatted_kpis['outstanding_balance'])
-with col3:
-    st.metric("Total Adjustments", formatted_kpis['total_adjustments'])
-
-# Analysis Tabs
-st.header("Revenue Cycle Analysis")
-tab1, tab2, tab3, tab4 = st.tabs(["Financial Overview", "Operational Efficiency", "Revenue Opportunities", "Data Explorer"])
-
-with tab1:
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Revenue Flow Analysis")
-        st.plotly_chart(create_revenue_flow_diagram(df), use_container_width=True)
-    with col2:
-        st.subheader("Payment Distribution by Payer")
-        st.plotly_chart(create_payment_distribution(df), use_container_width=True)
+def main():
+    """Main function to run the Streamlit application"""
+    # Application title and description
+    st.title("Versant Diagnostics Revenue Cycle Analysis")
+    st.markdown("""
+    This dashboard provides comprehensive analysis of revenue cycle metrics for anatomic pathology services.
+    Upload your data file or use sample data to explore key financial insights.
+    """)
     
-    st.subheader("Revenue by Location")
-    st.plotly_chart(create_location_revenue_chart(df), use_container_width=True)
-
-with tab2:
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Billing Efficiency")
-        st.plotly_chart(create_billing_efficiency_chart(df), use_container_width=True)
-    with col2:
-        st.subheader("Procedure Code Analysis")
-        st.plotly_chart(create_procedure_analysis(df), use_container_width=True)
+    # Sidebar for data loading options
+    st.sidebar.title("Data Source")
+    data_source = st.sidebar.radio(
+        "Select data source:",
+        ["Upload Excel File", "Use Sample Data"]
+    )
     
-    st.subheader("Data Quality Assessment")
-    st.plotly_chart(missing_values_analysis(df), use_container_width=True)
-
-with tab3:
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Revenue Leakage Analysis")
-        st.plotly_chart(create_revenue_leakage_analysis(df), use_container_width=True)
-    with col2:
-        st.subheader("Denial Patterns")
-        st.plotly_chart(create_denial_analysis(df), use_container_width=True)
-
-with tab4:
-    st.subheader("Data Explorer")
-    st.write("Explore the underlying data and filter by key fields")
+    # Initialize dataframe
+    df = pd.DataFrame()
     
-    # Filters
-    col1, col2 = st.columns(2)
-    with col1:
-        if 'Procedure Code' in df.columns:
-            procedure_filter = st.multiselect(
-                "Filter by Procedure Code:",
-                options=sorted(df['Procedure Code'].unique()),
-                default=[]
+    # Upload file widget - moved outside cached function
+    uploaded_file = None
+    if data_source == "Upload Excel File":
+        uploaded_file = st.sidebar.file_uploader(
+            "Upload Excel or CSV file", 
+            type=["xlsx", "xls", "csv"],
+            help="Upload your revenue cycle data file in Excel or CSV format"
+        )
+    
+    # Load data based on selection
+    if data_source == "Upload Excel File" and uploaded_file is not None:
+        df = load_data_from_upload(uploaded_file)
+    elif data_source == "Use Sample Data" and st.sidebar.button("Generate Sample Data"):
+        df = create_sample_data()
+        st.sidebar.success("Sample data generated!")
+    
+    # Process data if available
+    if not df.empty:
+        df = preprocess_data(df)
+        
+        # Display data info in sidebar
+        st.sidebar.subheader("Dataset Information")
+        st.sidebar.info(f"Total records: {len(df)}")
+        st.sidebar.info(f"Date range: {df['Date of Service'].min().date()} to {df['Date of Service'].max().date()}" 
+                      if 'Date of Service' in df.columns else "Date information not available")
+        
+        # Calculate KPIs
+        kpis = calculate_kpi_metrics(df)
+        
+        # Display KPIs in the main area
+        st.subheader("Key Performance Indicators")
+        
+        # Create 4 columns for KPIs
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "Total Charges", 
+                f"${kpis['total_charges']:,.2f}", 
+                delta=None
             )
-    with col2:
-        if 'Primary Payer Name' in df.columns:
-            payer_filter = st.multiselect(
-                "Filter by Primary Payer:",
-                options=sorted(df['Primary Payer Name'].unique()),
-                default=[]
+            st.metric(
+                "Case Volume", 
+                f"{int(kpis['case_volume']):,}", 
+                delta=None
             )
-    
-    # Apply filters
-    filtered_df = df.copy()
-    if 'Procedure Code' in df.columns and procedure_filter:
-        filtered_df = filtered_df[filtered_df['Procedure Code'].isin(procedure_filter)]
-    if 'Primary Payer Name' in df.columns and payer_filter:
-        filtered_df = filtered_df[filtered_df['Primary Payer Name'].isin(payer_filter)]
-    
-    # Show the filtered dataframe
-    st.dataframe(filtered_df)
+        
+        with col2:
+            st.metric(
+                "Total Payments", 
+                f"${kpis['total_payments']:,.2f}", 
+                delta=None
+            )
+            st.metric(
+                "Outstanding Balance", 
+                f"${kpis['outstanding_balance']:,.2f}", 
+                delta=None
+            )
+        
+        with col3:
+            st.metric(
+                "Collection Rate", 
+                f"{kpis['collection_rate']:.1f}%", 
+                delta=None
+            )
+            st.metric(
+                "Total Adjustments", 
+                f"${kpis['total_adjustments']:,.2f}", 
+                delta=None
+            )
+        
+        with col4:
+            st.metric(
+                "Avg Days to Bill", 
+                f"{kpis['avg_days_to_bill']:.1f}", 
+                delta=None
+            )
+            # Add a button to display the revenue cycle workflow
+            if st.button("View Revenue Cycle Workflow"):
+                st.markdown(get_workflow_svg(), unsafe_allow_html=True)
+        
+        # Tabs for different analyses
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "Revenue Analysis", "Billing Efficiency", "Payer Analysis", "Data Quality"
+        ])
+        
+        with tab1:
+            st.subheader("Revenue Flow Analysis")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.plotly_chart(create_revenue_flow_diagram(df), use_container_width=True)
+            
+            with col2:
+                st.plotly_chart(create_procedure_analysis(df), use_container_width=True)
+            
+            st.subheader("Revenue by Location")
+            st.plotly_chart(create_location_revenue_chart(df), use_container_width=True)
+            
+            st.subheader("Revenue Leakage Analysis")
+            st.plotly_chart(create_revenue_leakage_analysis(df), use_container_width=True)
+        
+        with tab2:
+            st.subheader("Billing Efficiency Metrics")
+            st.plotly_chart(create_billing_efficiency_chart(df), use_container_width=True)
+            
+            # Additional billing efficiency metrics could be added here
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Display average days between service and entry
+                if all(col in df.columns for col in ['Date of Service', 'Date of Entry']):
+                    avg_entry_days = (df['Date of Entry'] - df['Date of Service']).dt.days.mean()
+                    st.metric("Avg Days: Service to Entry", f"{avg_entry_days:.1f}", delta=None)
+            
+            with col2:
+                # Display average days between entry and billing
+                if all(col in df.columns for col in ['Date of Entry', 'Date of Initial Bill']):
+                    avg_entry_to_bill = (df['Date of Initial Bill'] - df['Date of Entry']).dt.days.mean()
+                    st.metric("Avg Days: Entry to Bill", f"{avg_entry_to_bill:.1f}", delta=None)
+        
+        with tab3:
+            st.subheader("Payer Analysis")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.plotly_chart(create_payment_distribution(df), use_container_width=True)
+            
+            with col2:
+                st.plotly_chart(create_denial_analysis(df), use_container_width=True)
+            
+            # If we have payer and collection rate data, display table
+            if all(col in df.columns for col in ['Primary Payer Name', 'Charge Line Item Amount', 'Total Payments Amount']):
+                st.subheader("Collection Rate by Payer")
+                
+                payer_stats = df.groupby('Primary Payer Name').agg({
+                    'Charge Line Item Amount': 'sum',
+                    'Total Payments Amount': 'sum',
+                    'Accession #': 'count'
+                }).reset_index()
+                
+                payer_stats.columns = ['Payer', 'Total Charges', 'Total Payments', 'Claim Count']
+                payer_stats['Collection Rate (%)'] = (payer_stats['Total Payments'] / payer_stats['Total Charges'] * 100).round(1)
+                payer_stats = payer_stats.sort_values('Collection Rate (%)', ascending=False)
+                
+                # Format currency columns
+                payer_stats['Total Charges'] = payer_stats['Total Charges'].apply(lambda x: f"${x:,.2f}")
+                payer_stats['Total Payments'] = payer_stats['Total Payments'].apply(lambda x: f"${x:,.2f}")
+                
+                st.dataframe(payer_stats, use_container_width=True)
+        
+        with tab4:
+            st.subheader("Data Quality Analysis")
+            st.plotly_chart(missing_values_analysis(df), use_container_width=True)
+            
+            # Display data preview with option to download
+            st.subheader("Data Preview")
+            st.dataframe(df.head(10), use_container_width=True)
+            
+            # Create a download button for the data
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Download Full Dataset as CSV",
+                data=csv,
+                file_name="versant_revenue_data.csv",
+                mime="text/csv",
+            )
+    else:
+        # Display welcome message and instructions if no data is loaded
+        st.info("👈 Please select a data source from the sidebar to get started.")
+        
+        # Show workflow diagram
+        st.subheader("Revenue Cycle Workflow")
+        st.markdown(get_workflow_svg(), unsafe_allow_html=True)
+        
+        st.markdown("""
+        ### About This Dashboard
+        
+        This revenue cycle analytics dashboard provides comprehensive insights into anatomic pathology billing and collections. Key features include:
+        
+        - **Revenue Analysis**: Visualize revenue flow, procedure profitability, and location performance
+        - **Billing Efficiency**: Track days to bill and identify bottlenecks in the billing process
+        - **Payer Analysis**: Analyze payment patterns and collection rates by payer
+        - **Data Quality**: Identify missing data and potential data quality issues
+        
+        To begin, upload your Excel data file or generate sample data using the options in the sidebar.
+        """)
 
-# Workflow Diagram Section (Optional)
-st.header("Revenue Cycle Workflow")
-st.components.v1.html(workflow_svg, height=520)
-
-# Footer
-st.markdown("---")
-st.caption("Versant Diagnostics Revenue Cycle Dashboard © 2025")
+if __name__ == "__main__":
+    main()
