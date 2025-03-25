@@ -16,13 +16,31 @@ st.set_page_config(
 )
 
 # -------------------------------------------------------------
-# Data Loading Function using Cloud Storage
+# Data Loading Function with Multiple Options
 # -------------------------------------------------------------
 @st.cache_data
 def load_data():
-    """Load the data from cloud storage"""
+    """Load the data from cloud storage or file upload"""
     
-    # Option 1: Using Google Cloud Storage with service account
+    # Option 1: File uploader
+    uploaded_file = st.file_uploader("Upload Excel File (optional)", type="xlsx")
+    
+    if uploaded_file is not None:
+        try:
+            df = pd.read_excel(uploaded_file)
+            st.success("Successfully loaded data from uploaded file")
+        except Exception as e:
+            st.error(f"Failed to load from uploaded file: {e}")
+            # Fall back to Google Cloud Storage if file upload fails
+            df = load_from_gcs()
+    else:
+        # Try loading from Google Cloud Storage
+        df = load_from_gcs()
+            
+    return process_dataframe(df)
+
+def load_from_gcs():
+    """Helper function to load data from Google Cloud Storage"""
     try:
         from st_files_connection import FilesConnection
         
@@ -33,12 +51,36 @@ def load_data():
         # Read the file from your GCS bucket
         df = conn.read("practice-spreadsheet/PracticeCaseStudy.xlsx", input_format=None, ttl=3600)
         st.success("Successfully loaded data from Google Cloud Storage")
+        return df
         
     except Exception as e:
         st.error(f"Failed to load from GCS: {e}")
-        
-    
-    # Process the dataframe (same as your original code)
+        # Create sample data if nothing is available
+        st.warning("Using sample data for demonstration.")
+        return create_sample_data()
+
+def create_sample_data():
+    """Create sample data for demonstration"""
+    df = pd.DataFrame({
+        "Date of Service": pd.date_range(start="2023-01-01", periods=100, freq="D"),
+        "Charge Line Item Amount": np.random.uniform(100, 5000, 100),
+        "Total Payments Amount": np.random.uniform(50, 4000, 100),
+        "Total Adjustments Amount": np.random.uniform(0, 1000, 100),
+        "Charge Line Item Balance": np.random.uniform(0, 1000, 100),
+        "Accession #": [f"ACC-{i:04d}" for i in range(100)],
+        "Primary Payer Name": np.random.choice(["Medicare", "Medicaid", "Private Insurance", "Self Pay"], 100),
+        "Primary Payer Payment Amount": np.random.uniform(50, 3000, 100),
+        "Total Contractual Adjustment Amount": np.random.uniform(0, 2000, 100),
+        "Total Other Adjustment Amount": np.random.uniform(0, 500, 100),
+        "Date of Entry": pd.date_range(start="2023-01-01", periods=100, freq="D"),
+        "Date of Initial Bill": pd.date_range(start="2023-01-05", periods=100, freq="D"),
+        "Procedure Code": np.random.choice(["88305", "88342", "88341", "88312", "88313"], 100),
+        "Location of Service Name": np.random.choice(["Main Hospital", "Downtown Clinic", "North Branch", "South Branch"], 100),
+    })
+    return df
+
+def process_dataframe(df):
+    """Process the dataframe with common transformations"""
     # Convert date columns to datetime
     date_columns = ['Date of Service', 'Date of Entry', 'Date of Initial Bill']
     for col in date_columns:
@@ -56,12 +98,7 @@ def load_data():
     # Add year-month field for time series analysis
     if 'Date of Service' in df.columns:
         df['Service Month'] = df['Date of Service'].dt.strftime('%Y-%m')
-            
-    return df
     
-    if 'Service Month' in df.columns:
-        df['Service Month'] = df['Service Month'].astype(str)
-        
     return df
 
 # Load the data
@@ -147,11 +184,9 @@ def missing_values_analysis(df):
     
     return fig
 
-# Copy over all your other visualization functions from the original code
-# [Revenue flow diagram, payment distribution, billing efficiency, etc.]
-
-# For brevity, I've excluded some of the visualization functions
-# In your actual implementation, include all of them
+# -------------------------------------------------------------
+# Enhanced Data Visualizations
+# -------------------------------------------------------------
 
 def create_revenue_flow_diagram(df, row_limit=None):
     """Create a Sankey diagram showing revenue flow from charges to final balance"""
@@ -250,6 +285,7 @@ def create_payment_distribution(df):
     fig.update_layout(height=500)
     
     return fig
+
 def create_billing_efficiency_chart(df):
     """Create chart showing billing efficiency (days to bill)"""
     # Check if necessary column exists
@@ -774,12 +810,6 @@ workflow_svg = '''
 st.title("Versant Diagnostics Revenue Cycle Analysis")
 st.subheader("Interactive dashboard for analyzing revenue cycle performance metrics")
 
-# Data quality alert
-st.info("Note: This dashboard uses sample data. In a production environment, connect to your live data source.")
-
-# KPI Card Row
-st.header("Key Performance Indicators")
-
 # Format KPI values for display
 formatted_kpis = {
     'total_charges': f"${kpi_metrics['total_charges']:,.2f}",
@@ -790,6 +820,9 @@ formatted_kpis = {
     'outstanding_balance': f"${kpi_metrics['outstanding_balance']:,.2f}",
     'case_volume': f"{kpi_metrics['case_volume']:,}"
 }
+
+# KPI Card Row
+st.header("Key Performance Indicators")
 
 # Display KPIs in a grid with 4 and 3 metrics per row
 col1, col2, col3, col4 = st.columns(4)
@@ -823,16 +856,17 @@ with tab1:
         st.subheader("Payment Distribution by Payer")
         st.plotly_chart(create_payment_distribution(df), use_container_width=True)
     
-    # Add your location revenue analysis chart here
+    st.subheader("Revenue by Location")
+    st.plotly_chart(create_location_revenue_chart(df), use_container_width=True)
 
 with tab2:
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Billing Efficiency")
-        # Add your billing efficiency chart here
+        st.plotly_chart(create_billing_efficiency_chart(df), use_container_width=True)
     with col2:
         st.subheader("Procedure Code Analysis")
-        # Add your procedure analysis chart here
+        st.plotly_chart(create_procedure_analysis(df), use_container_width=True)
     
     st.subheader("Data Quality Assessment")
     st.plotly_chart(missing_values_analysis(df), use_container_width=True)
@@ -841,10 +875,10 @@ with tab3:
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Revenue Leakage Analysis")
-        # Add your revenue leakage analysis here
+        st.plotly_chart(create_revenue_leakage_analysis(df), use_container_width=True)
     with col2:
         st.subheader("Denial Patterns")
-        # Add your denial analysis here
+        st.plotly_chart(create_denial_analysis(df), use_container_width=True)
 
 with tab4:
     st.subheader("Data Explorer")
@@ -877,6 +911,10 @@ with tab4:
     # Show the filtered dataframe
     st.dataframe(filtered_df)
 
+# Workflow Diagram Section (Optional)
+st.header("Revenue Cycle Workflow")
+st.components.v1.html(workflow_svg, height=520)
+
 # Footer
 st.markdown("---")
-st.caption("Versant Diagnostics Revenue Cycle Dashboard © 2023")
+st.caption("Versant Diagnostics Revenue Cycle Dashboard © 2025")
